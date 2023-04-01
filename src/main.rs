@@ -25,19 +25,28 @@ fn main() -> Result<(), String> {
     let im_radius = re_radius*img_size.1 as f64/img_size.0 as f64;
     let re_range = (img_center.re-re_radius, img_center.re+re_radius);
     let im_range = (img_center.im-im_radius, img_center.im+im_radius);
-
+    
+    let mut iters = Array2::<usize>::zeros((img_size.0, img_size.1));
+    let mut bins = Array1::<f64>::zeros(max_iterations+1);
     let mut img = Array3::<u8>::zeros(img_size);
-
-    par_azip!((index (x, y), mut pixel in img.rows_mut()) {
+    
+    azip!((index (x, y), iter in &mut iters) {
         let z = Complex64::new(
             change_range(x as f64, 0., img_size.0 as f64, re_range.0, re_range.1),
             change_range(y as f64, 0., img_size.1 as f64, im_range.0, im_range.1)
         );
-        let iters = fractal_iterations(z, max_iterations);
-        let iter_frac = iters as f64/(1.+max_iterations as f64);
-        let color_idx = color_stops.iter().position(|&t| iter_frac < t).unwrap();
+
+        *iter = fractal_iterations(z, max_iterations);
+        bins[*iter] += 1.;
+    });
+    
+    for i in 0..max_iterations { bins[i+1] += bins[i]; }
+    bins /= bins[max_iterations];
+
+    par_azip!((mut pixel in img.rows_mut(), &iter in &iters) {
+        let color_idx = color_stops.iter().position(|&t| bins[iter] <= t).unwrap();
         let (a, b) = (color_stops[color_idx-1], color_stops[color_idx]);
-        let interp = (iter_frac-a)/(b-a);
+        let interp = (bins[iter]-a)/(b-a);
 
         Zip::from(&mut pixel)
             .and(colors.slice(s![color_idx-1, ..]))

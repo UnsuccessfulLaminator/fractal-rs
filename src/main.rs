@@ -18,29 +18,15 @@ fn main() -> Result<(), String> {
         array![8, 57, 100]
     ];
 
-    // These are calculated 
-    let re_radius = if img_size.0 < img_size.1 { img_minor_radius as f64 }
-                    else { img_minor_radius as f64*img_size.0 as f64/img_size.1 as f64 };
-    let im_radius = re_radius*img_size.1 as f64/img_size.0 as f64;
-    let re_range = (img_center.re-re_radius, img_center.re+re_radius);
-    let im_range = (img_center.im-im_radius, img_center.im+im_radius);
-    
+    let mut img = Array3::<u8>::zeros(img_size);
     let mut iters = Array2::<usize>::zeros((img_size.0, img_size.1));
     let mut bins = Array1::<f64>::zeros(max_iterations+1);
-    let mut img = Array3::<u8>::zeros(img_size);
     
-    azip!((index (x, y), iter in &mut iters) {
-        let z = Complex64::new(
-            change_range(x as f64, 0., img_size.0 as f64, re_range.0, re_range.1),
-            change_range(y as f64, 0., img_size.1 as f64, im_range.0, im_range.1)
-        );
+    iterate_points(img_center, img_minor_radius, max_iterations, &mut iters.view_mut());
 
-        *iter = fractal_iterations(z, max_iterations);
-        bins[*iter] += 1.;
-    });
-    
-    for i in 0..max_iterations { bins[i+1] += bins[i]; }
-    bins /= bins[max_iterations];
+    for &iter in &iters { bins[iter] += 1.; } // Frequencies of different iterations
+    for i in 0..max_iterations { bins[i+1] += bins[i]; } // Make cumulative
+    bins /= bins[max_iterations]; // As a fraction of the total
 
     par_azip!((mut pixel in img.rows_mut(), &iter in &iters) {
         lerp_colors(&colors, bins[iter], &mut pixel);
@@ -55,6 +41,28 @@ fn main() -> Result<(), String> {
     image::save_buffer(out_path, data, width, height, image::ColorType::Rgb8)
           .map_err(|e| e.to_string())
 }
+
+fn iterate_points(
+    center: Complex64, minor_radius: f64, max_iterations: usize,
+    out: &mut ArrayViewMut2<usize>
+) {
+    let (width, height) = (out.dim().0, out.dim().1);
+    let aspect = width as f64/height as f64;
+    let re_radius = if width < height { minor_radius } else { minor_radius*aspect };
+    let im_radius = re_radius/aspect;
+    let re_range = (center.re-re_radius, center.re+re_radius);
+    let im_range = (center.im-im_radius, center.im+im_radius);
+    
+    par_azip!((index (x, y), iter in out) {
+        let z = Complex64::new(
+            change_range(x as f64, 0., width as f64, re_range.0, re_range.1),
+            change_range(y as f64, 0., height as f64, im_range.0, im_range.1)
+        );
+
+        *iter = fractal_iterations(z, max_iterations);
+    });
+}
+    
 
 fn lerp_colors(colors: &[Array1<u8>], value: f64, out: &mut ArrayViewMut1<u8>) {
     let scaled = value*(colors.len()-1) as f64;

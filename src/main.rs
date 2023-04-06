@@ -23,10 +23,7 @@ fn main() -> Result<(), String> {
     let mut bins = Array1::<f64>::zeros(max_iterations+1);
     
     iterate_points(img_center, img_minor_radius, max_iterations, &mut iters.view_mut());
-
-    for &iter in &iters { bins[iter] += 1.; } // Frequencies of different iterations
-    for i in 0..max_iterations { bins[i+1] += bins[i]; } // Make cumulative
-    bins /= bins[max_iterations]; // As a fraction of the total
+    gen_histogram(iters.view(), &mut bins.view_mut());
 
     par_azip!((mut pixel in img.rows_mut(), &iter in &iters) {
         lerp_colors(&colors, bins[iter], &mut pixel);
@@ -42,11 +39,20 @@ fn main() -> Result<(), String> {
           .map_err(|e| e.to_string())
 }
 
+fn gen_histogram<D: Dimension>(values: ArrayView<usize, D>, out: &mut ArrayViewMut1<f64>) {
+    out.fill(0.);
+
+    for &val in &values { out[val] += 1.; } // Frequencies of different values
+    for i in 0..out.len()-1 { out[i+1] += out[i]; } // Make cumulative
+    
+    *out /= out[out.len()-1]; // As a fraction of the total
+}
+
 fn iterate_points(
     center: Complex64, minor_radius: f64, max_iterations: usize,
     out: &mut ArrayViewMut2<usize>
 ) {
-    let (width, height) = (out.dim().0, out.dim().1);
+    let (width, height) = out.dim();
     let aspect = width as f64/height as f64;
     let re_radius = if width < height { minor_radius } else { minor_radius*aspect };
     let im_radius = re_radius/aspect;

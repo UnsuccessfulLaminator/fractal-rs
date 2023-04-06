@@ -1,7 +1,7 @@
 use image;
 use num_complex::Complex64;
 use ndarray::prelude::*;
-use ndarray::{Zip, par_azip};
+use ndarray::par_azip;
 
 
 
@@ -12,14 +12,13 @@ fn main() -> Result<(), String> {
     let img_center = Complex64::new(-0.743643135, 0.131825963);
     let img_minor_radius = 0.00001;
     let max_iterations = 500;
-    let colors: Array2::<u8> = array![
-        [1, 4, 13],
-        [1, 16, 39],
-        [8, 57, 100]
+    let colors = [
+        array![1, 4, 13],
+        array![1, 16, 39],
+        array![8, 57, 100]
     ];
 
     // These are calculated 
-    let color_stops = Array1::<f64>::linspace(0., 1., colors.nrows());
     let re_radius = if img_size.0 < img_size.1 { img_minor_radius as f64 }
                     else { img_minor_radius as f64*img_size.0 as f64/img_size.1 as f64 };
     let im_radius = re_radius*img_size.1 as f64/img_size.0 as f64;
@@ -44,14 +43,7 @@ fn main() -> Result<(), String> {
     bins /= bins[max_iterations];
 
     par_azip!((mut pixel in img.rows_mut(), &iter in &iters) {
-        let color_idx = color_stops.iter().position(|&t| bins[iter] <= t).unwrap();
-        let (a, b) = (color_stops[color_idx-1], color_stops[color_idx]);
-        let interp = (bins[iter]-a)/(b-a);
-
-        Zip::from(&mut pixel)
-            .and(colors.slice(s![color_idx-1, ..]))
-            .and(colors.slice(s![color_idx, ..]))
-            .for_each(|p, &c1, &c2| *p = lerp(c1 as f64, c2 as f64, interp) as u8);
+        lerp_colors(&colors, bins[iter], &mut pixel);
     });
     
     img.swap_axes(0, 1);
@@ -59,9 +51,20 @@ fn main() -> Result<(), String> {
     let img = img.as_standard_layout();
     let data = img.as_slice().unwrap();
     let (width, height) = (img_size.0 as u32, img_size.1 as u32);
-    
+
     image::save_buffer(out_path, data, width, height, image::ColorType::Rgb8)
           .map_err(|e| e.to_string())
+}
+
+fn lerp_colors(colors: &[Array1<u8>], value: f64, out: &mut ArrayViewMut1<u8>) {
+    let scaled = value*(colors.len()-1) as f64;
+    let idx = (scaled.floor() as usize).clamp(0, colors.len()-2);
+    let frac = scaled-idx as f64;
+    let (start_color, end_color) = (&colors[idx], &colors[idx+1]);
+
+    azip!((o in out, &a in start_color, &b in end_color) {
+        *o = lerp(a as f64, b as f64, frac) as u8;
+    });
 }
 
 fn lerp(x1: f64, x2: f64, fraction: f64) -> f64 {

@@ -2,10 +2,11 @@ use image;
 use num_complex::Complex64;
 use ndarray::prelude::*;
 use ndarray::par_azip;
+use std::process::exit;
 
 
 
-fn main() -> Result<(), String> {
+fn main() {
     // Set up these parameters for image generation
     let out_path = "./out.png";
     let img_size = (1366, 768, 3);
@@ -29,14 +30,37 @@ fn main() -> Result<(), String> {
         lerp_colors(&colors, bins[iter], &mut pixel);
     });
     
-    img.swap_axes(0, 1);
-    
-    let img = img.as_standard_layout();
-    let data = img.as_slice().unwrap();
-    let (width, height) = (img_size.0 as u32, img_size.1 as u32);
+    match save_image(&out_path, img.view()) {
+        Ok(_) => println!("Saved to {out_path}"),
+        Err(e) => {
+            eprintln!("Could not save to {out_path}. Error: {}", e.to_string());
+            exit(1);
+        }
+    };
+}
 
-    image::save_buffer(out_path, data, width, height, image::ColorType::Rgb8)
-          .map_err(|e| e.to_string())
+fn save_image<D: Dimension>(path: &str, image: ArrayView<u8, D>) -> image::ImageResult<()> {
+    let color_type = match image.ndim() {
+        2 => image::ColorType::L8,
+        3 => match image.len_of(Axis(2)) {
+            1 => image::ColorType::L8,
+            2 => image::ColorType::La8,
+            3 => image::ColorType::Rgb8,
+            4 => image::ColorType::Rgba8,
+            _ => panic!("Image array pixels must have 1 to 4 components!"),
+        },
+        _ => panic!("Image array must have 2 or 3 dimensions!"),
+    };
+
+    let (width, height) = (image.len_of(Axis(0)) as u32, image.len_of(Axis(1)) as u32);
+    let mut transposed = image.view();
+
+    transposed.swap_axes(0, 1);
+
+    let contiguous = transposed.as_standard_layout();
+    let data = contiguous.as_slice().unwrap();
+
+    image::save_buffer(path, data, width, height, color_type)
 }
 
 fn gen_histogram<D: Dimension>(values: ArrayView<usize, D>, out: &mut ArrayViewMut1<f64>) {

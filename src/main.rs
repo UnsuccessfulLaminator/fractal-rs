@@ -1,39 +1,68 @@
+mod size2d;
+
 use image;
 use num_complex::Complex64;
 use ndarray::prelude::*;
 use ndarray::par_azip;
 use std::process::exit;
+use clap::Parser;
+use size2d::Size2D;
 
 
+
+const DEFAULT_CENTER: Complex64 = Complex64::new(-0.743643135, 0.131825963);
+
+#[derive(Parser)]
+#[command(arg_required_else_help = true)]
+struct Args {
+    #[arg(help = "Path for the output image")]
+    path: String,
+    
+    #[arg(short, long, default_value_t = Size2D(640, 480))]
+    #[arg(help = "Size of the image in pixels, WIDTHxHEIGHT")]
+    size: Size2D,
+
+    #[arg(short, long, default_value_t = DEFAULT_CENTER, allow_hyphen_values = true)]
+    #[arg(help = "Complex value at the center of the image")]
+    center: Complex64,
+
+    #[arg(short, long, default_value_t = 0.00001)]
+    #[arg(help = "Shortest distance from the center of the image to the edge")]
+    radius: f64,
+
+    #[arg(short, long, default_value_t = 500)]
+    #[arg(help = "Maximum number of iterations used to render a pixel")]
+    iterations: usize
+}
 
 fn main() {
+    let args = Args::parse();
+
     // Set up these parameters for image generation
-    let out_path = "./out.png";
-    let img_size = (1366, 768, 3);
-    let img_center = Complex64::new(-0.743643135, 0.131825963);
-    let img_minor_radius = 0.00001;
-    let max_iterations = 500;
+    // e);
+    //let img_minor_radius = 0.00001;
     let colors = [
         array![1, 4, 13],
         array![1, 16, 39],
         array![8, 57, 100]
     ];
+    let color_channels = colors[0].len();
 
-    let mut img = Array3::<u8>::zeros(img_size);
-    let mut iters = Array2::<usize>::zeros((img_size.0, img_size.1));
-    let mut bins = Array1::<f64>::zeros(max_iterations+1);
+    let mut img = Array3::<u8>::zeros((args.size.0, args.size.1, color_channels));
+    let mut iters = Array2::<usize>::zeros((args.size.0, args.size.1));
+    let mut bins = Array1::<f64>::zeros(args.iterations+1);
     
-    iterate_points(img_center, img_minor_radius, max_iterations, &mut iters.view_mut());
+    iterate_points(args.center, args.radius, args.iterations, &mut iters.view_mut());
     gen_histogram(iters.view(), &mut bins.view_mut());
 
     par_azip!((mut pixel in img.rows_mut(), &iter in &iters) {
         lerp_colors(&colors, bins[iter], &mut pixel);
     });
     
-    match save_image(&out_path, img.view()) {
-        Ok(_) => println!("Saved to {out_path}"),
+    match save_image(&args.path, img.view()) {
+        Ok(_) => println!("Saved to {}", args.path),
         Err(e) => {
-            eprintln!("Could not save to {out_path}. Error: {}", e.to_string());
+            eprintln!("Could not save to {}. Error: {}", args.path, e.to_string());
             exit(1);
         }
     };
